@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouBike 即時服務資訊地圖</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+
+        /* Fullscreen Map Background styling */
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(241, 245, 249, 0.5);
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.6);
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(100, 116, 139, 0.8);
+        }
+
+        /* Glassmorphism styling */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .glass-panel-dark {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .leaflet-popup-content-wrapper {
+            border-radius: 16px;
+            padding: 4px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+        }
+
+        .marker-cluster-custom {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-weight: 700;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 2px solid white;
+        }
+
+        .marker-cluster-custom:hover {
+            transform: scale(1.25);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-800 h-screen w-screen overflow-hidden relative select-none">
+
+    <!-- Fullscreen Background Map Container -->
+    <div id="map"></div>
+
+    <!-- Floating Header Bar -->
+    <header class="absolute top-4 left-4 right-4 z-20 pointer-events-none">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            
+            <!-- Logo & Title Badge -->
+            <div class="glass-panel px-4 py-2.5 rounded-2xl shadow-xl flex items-center space-x-3 pointer-events-auto border border-white/60">
+                <div class="bg-amber-500 text-white p-2.5 rounded-xl shadow-md flex items-center justify-center">
+                    <i class="fa-solid fa-bicycle text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base md:text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                        YouBike 即時地圖
+                        <span class="text-[10px] bg-amber-500/20 text-amber-800 px-2 py-0.5 rounded-full font-bold">桃園地區</span>
+                    </h1>
+                    <p class="text-[11px] text-slate-500">全螢幕即時借還與空位數據整合分析</p>
+                </div>
+            </div>
+
+            <!-- Stats Overview Floating Cards -->
+            <div class="glass-panel px-4 py-2 rounded-2xl shadow-xl hidden lg:flex items-center gap-6 pointer-events-auto border border-white/60">
+                <div class="text-center">
+                    <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">總場站</div>
+                    <div id="stat-total-stations" class="text-base font-extrabold text-slate-800">162</div>
+                </div>
+                <div class="h-6 w-px bg-slate-300/60"></div>
+                <div class="text-center">
+                    <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">可借車位</div>
+                    <div id="stat-total-available" class="text-base font-extrabold text-emerald-600">0</div>
+                </div>
+                <div class="h-6 w-px bg-slate-300/60"></div>
+                <div class="text-center">
+                    <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">可還空位</div>
+                    <div id="stat-total-empty" class="text-base font-extrabold text-sky-600">0</div>
+                </div>
+                <div class="h-6 w-px bg-slate-300/60"></div>
+                <div class="text-center">
+                    <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">平均使用率</div>
+                    <div id="stat-avg-usage" class="text-base font-extrabold text-amber-600">0%</div>
+                </div>
+            </div>
+
+            <!-- File Upload & Controls -->
+            <div class="flex items-center gap-2 pointer-events-auto">
+                <label for="csv-file-input" class="cursor-pointer bg-slate-900/90 hover:bg-slate-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xl flex items-center gap-2 border border-slate-700/80 hover:scale-105 active:scale-95">
+                    <i class="fa-solid fa-file-csv text-amber-400 text-sm"></i>
+                    <span>匯入 CSV 檔</span>
+                </label>
+                <input type="file" id="csv-file-input" accept=".csv" class="hidden">
+
+                <!-- Mobile Toggle Sidebar Button -->
+                <button id="toggle-sidebar-btn" class="md:hidden glass-panel p-2.5 rounded-xl text-slate-800 shadow-xl pointer-events-auto">
+                    <i class="fa-solid fa-bars text-lg"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Floating Sidebar Overlay Panel -->
+    <aside id="sidebar" class="absolute top-20 bottom-6 left-4 z-20 w-80 md:w-96 glass-panel rounded-3xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 border border-white/60">
+        
+        <!-- Filter Header Inside Sidebar -->
+        <div class="p-4 border-b border-slate-200/60 space-y-3 bg-white/40">
+            <!-- District & Status Filter Controls -->
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">行政區域</label>
+                    <select id="district-select" class="w-full bg-white/90 border border-slate-200 text-slate-800 text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-sm font-medium">
+                        <option value="ALL">全部行政區</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">車位狀態</label>
+                    <select id="status-select" class="w-full bg-white/90 border border-slate-200 text-slate-800 text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-sm font-medium">
+                        <option value="ALL">全部狀態</option>
+                        <option value="AVAILABLE">可借車輛 (>0)</option>
+                        <option value="EMPTY">無車可借 (=0)</option>
+                        <option value="HIGH_USAGE">高使用率 (>70%)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Keyword Search -->
+            <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                <input type="text" id="search-input" placeholder="搜尋區域、站點編號或車位數..." class="w-full pl-9 pr-3 py-2 bg-white/90 border border-slate-200 text-slate-800 text-xs rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none shadow-sm">
+            </div>
+
+            <!-- Stats Bar Count -->
+            <div class="flex items-center justify-between text-xs text-slate-600 font-medium pt-0.5">
+                <span>符合條件：<strong id="filter-count" class="text-amber-600 font-extrabold">0</strong> 筆</span>
+                <span id="data-source-tag" class="text-[10px] bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold border border-emerald-300/50">內建 162 筆 CSV</span>
+            </div>
+        </div>
+
+        <!-- Station Cards Scroll Area -->
+        <div id="station-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
+            <!-- Dynamic Cards Inserted Here -->
+        </div>
+    </aside>
+
+    <!-- Floating Bottom Legend -->
+    <div class="absolute bottom-6 right-6 z-20 glass-panel p-3.5 rounded-2xl shadow-2xl text-xs space-y-2 border border-white/60 pointer-events-auto">
+        <div class="font-bold text-slate-800 border-b border-slate-200/80 pb-1 text-[11px]">車位即時圖例</div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white shadow-sm inline-block"></span>
+            <span class="text-slate-700 font-medium">車輛充足 (≥ 3 輛)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-amber-500 border-2 border-white shadow-sm inline-block"></span>
+            <span class="text-slate-700 font-medium">車輛較少 (1 ~ 2 輛)</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="w-3.5 h-3.5 rounded-full bg-rose-500 border-2 border-white shadow-sm inline-block"></span>
+            <span class="text-slate-700 font-medium">無車可借 (0 輛)</span>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-20 right-6 glass-panel-dark text-white text-xs px-4 py-3 rounded-2xl shadow-2xl z-50 transition-all duration-300 opacity-0 pointer-events-none flex items-center gap-2.5 border border-slate-700">
+        <i class="fa-solid fa-circle-info text-amber-400 text-base"></i>
+        <span id="toast-msg">提示訊息</span>
+    </div>
+
+    <script>
+        // Exact 162 CSV records from 'Youbike即時服務資料.csv'
+        const rawCSVData = [
+            {"場站區域":"中壢區","總車位數":14,"可借車位數":8,"已借車位數":6,"可還空位數":6,"未使用率":57,"已使用率":43},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":4,"已借車位數":8,"可還空位數":8,"未使用率":33,"已使用率":67},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":10,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":9,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":7,"已借車位數":3,"可還空位數":3,"未使用率":70,"已使用率":30},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":4,"已借車位數":14,"可還空位數":14,"未使用率":22,"已使用率":78},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":4,"未使用率":38,"已使用率":63},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":2,"已借車位數":12,"可還空位數":12,"未使用率":14,"已使用率":86},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":4,"未使用率":38,"已使用率":63},
+            {"場站區域":"桃園區","總車位數":20,"可借車位數":1,"已借車位數":19,"可還空位數":19,"未使用率":5,"已使用率":95},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":10,"未使用率":17,"已使用率":83},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":9,"未使用率":17,"已使用率":83},
+            {"場站區域":"中壢區","總車位數":22,"可借車位數":3,"已借車位數":19,"可還空位數":18,"未使用率":14,"已使用率":86},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":7,"已借車位數":3,"可還空位數":2,"未使用率":70,"已使用率":30},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":10,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":10,"已借車位數":6,"可還空位數":6,"未使用率":63,"已使用率":38},
+            {"場站區域":"平鎮區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"平鎮區","總車位數":10,"可借車位數":3,"已借車位數":7,"可還空位數":7,"未使用率":30,"已使用率":70},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":4,"已借車位數":12,"可還空位數":11,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":3,"已借車位數":7,"可還空位數":6,"未使用率":30,"已使用率":70},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":2,"已借車位數":12,"可還空位數":11,"未使用率":14,"已使用率":86},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":7,"已借車位數":5,"可還空位數":5,"未使用率":58,"已使用率":42},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":4,"已借車位數":10,"可還空位數":10,"未使用率":29,"已使用率":71},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":4,"已借車位數":8,"可還空位數":8,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":3,"已借車位數":3,"可還空位數":3,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":4,"已借車位數":8,"可還空位數":7,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":10,"未使用率":17,"已使用率":83},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":4,"已借車位數":6,"可還空位數":6,"未使用率":40,"已使用率":60},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":20,"可借車位數":4,"已借車位數":16,"可還空位數":16,"未使用率":20,"已使用率":80},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":22,"可借車位數":6,"已借車位數":16,"可還空位數":16,"未使用率":27,"已使用率":73},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":6,"未使用率":20,"已使用率":80},
+            {"場站區域":"中壢區","總車位數":16,"可借車位數":1,"已借車位數":15,"可還空位數":15,"未使用率":6,"已使用率":94},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":4,"已借車位數":6,"可還空位數":5,"未使用率":40,"已使用率":60},
+            {"場站區域":"中壢區","總車位數":20,"可借車位數":12,"已借車位數":8,"可還空位數":8,"未使用率":60,"已使用率":40},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":15,"已借車位數":3,"可還空位數":3,"未使用率":83,"已使用率":17},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":2,"已借車位數":16,"可還空位數":16,"未使用率":11,"已使用率":89},
+            {"場站區域":"龜山區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":8,"未使用率":20,"已使用率":80},
+            {"場站區域":"龜山區","總車位數":12,"可借車位數":0,"已借車位數":12,"可還空位數":0,"未使用率":0,"已使用率":100},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":9,"未使用率":10,"已使用率":90},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":8,"未使用率":20,"已使用率":80},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":0,"已借車位數":10,"可還空位數":0,"未使用率":0,"已使用率":100},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":9,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":3,"已借車位數":15,"可還空位數":15,"未使用率":17,"已使用率":83},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":5,"已借車位數":3,"可還空位數":3,"未使用率":63,"已使用率":38},
+            {"場站區域":"中壢區","總車位數":14,"可借車位數":1,"已借車位數":13,"可還空位數":12,"未使用率":7,"已使用率":93},
+            {"場站區域":"中壢區","總車位數":14,"可借車位數":2,"已借車位數":12,"可還空位數":11,"未使用率":14,"已使用率":86},
+            {"場站區域":"龜山區","總車位數":8,"可借車位數":6,"已借車位數":2,"可還空位數":2,"未使用率":75,"已使用率":25},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":5,"未使用率":38,"已使用率":63},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":5,"已借車位數":5,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":6,"已借車位數":6,"可還空位數":5,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":4,"已借車位數":8,"可還空位數":7,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":5,"已借車位數":3,"可還空位數":3,"未使用率":63,"已使用率":38},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":9,"未使用率":10,"已使用率":90},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":6,"已借車位數":8,"可還空位數":8,"未使用率":43,"已使用率":57},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":8,"已借車位數":4,"可還空位數":4,"未使用率":67,"已使用率":33},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":4,"已借車位數":6,"可還空位數":6,"未使用率":40,"已使用率":60},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":5,"未使用率":38,"已使用率":63},
+            {"場站區域":"平鎮區","總車位數":8,"可借車位數":4,"已借車位數":4,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"龜山區","總車位數":14,"可借車位數":0,"已借車位數":14,"可還空位數":14,"未使用率":0,"已使用率":100},
+            {"場站區域":"龜山區","總車位數":12,"可借車位數":0,"已借車位數":12,"可還空位數":11,"未使用率":0,"已使用率":100},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":5,"已借車位數":3,"可還空位數":1,"未使用率":63,"已使用率":38},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":5,"已借車位數":9,"可還空位數":7,"未使用率":36,"已使用率":64},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":4,"已借車位數":6,"可還空位數":5,"未使用率":40,"已使用率":60},
+            {"場站區域":"平鎮區","總車位數":8,"可借車位數":6,"已借車位數":2,"可還空位數":2,"未使用率":75,"已使用率":25},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":4,"未使用率":33,"已使用率":67},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":8,"未使用率":20,"已使用率":80},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":7,"未使用率":10,"已使用率":90},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":3,"已借車位數":3,"可還空位數":2,"未使用率":50,"已使用率":50},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"龜山區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":6,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":6,"已借車位數":12,"可還空位數":11,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":4,"已借車位數":10,"可還空位數":10,"未使用率":29,"已使用率":71},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":5,"未使用率":38,"已使用率":63},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":6,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":6,"已借車位數":10,"可還空位數":10,"未使用率":38,"已使用率":63},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":3,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":10,"未使用率":8,"已使用率":92},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":9,"未使用率":10,"已使用率":90},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":1,"已借車位數":5,"可還空位數":5,"未使用率":17,"已使用率":83},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":3,"未使用率":33,"已使用率":67},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":1,"已借車位數":5,"可還空位數":5,"未使用率":17,"已使用率":83},
+            {"場站區域":"龜山區","總車位數":20,"可借車位數":7,"已借車位數":13,"可還空位數":13,"未使用率":35,"已使用率":65},
+            {"場站區域":"龜山區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":4,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":5,"未使用率":38,"已使用率":63},
+            {"場站區域":"龜山區","總車位數":22,"可借車位數":2,"已借車位數":20,"可還空位數":18,"未使用率":9,"已使用率":91},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":4,"未使用率":33,"已使用率":67},
+            {"場站區域":"中壢區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":11,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"中壢區","總車位數":6,"可借車位數":3,"已借車位數":3,"可還空位數":3,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":4,"未使用率":33,"已使用率":67},
+            {"場站區域":"中壢區","總車位數":16,"可借車位數":5,"已借車位數":11,"可還空位數":10,"未使用率":31,"已使用率":69},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":9,"未使用率":10,"已使用率":90},
+            {"場站區域":"龜山區","總車位數":18,"可借車位數":3,"已借車位數":15,"可還空位數":13,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":4,"已借車位數":8,"可還空位數":8,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":3,"已借車位數":11,"可還空位數":11,"未使用率":21,"已使用率":79},
+            {"場站區域":"桃園區","總車位數":20,"可借車位數":5,"已借車位數":15,"可還空位數":9,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":8,"未使用率":17,"已使用率":83},
+            {"場站區域":"平鎮區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":6,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":2,"已借車位數":4,"可還空位數":4,"未使用率":33,"已使用率":67},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":4,"已借車位數":12,"可還空位數":10,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":6,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":5,"已借車位數":5,"可還空位數":5,"未使用率":50,"已使用率":50},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"中壢區","總車位數":18,"可借車位數":3,"已借車位數":15,"可還空位數":15,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":18,"可借車位數":3,"已借車位數":15,"可還空位數":12,"未使用率":17,"已使用率":83},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":8,"未使用率":20,"已使用率":80},
+            {"場站區域":"中壢區","總車位數":22,"可借車位數":2,"已借車位數":20,"可還空位數":19,"未使用率":9,"已使用率":91},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":8,"未使用率":10,"已使用率":90},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":3,"已借車位數":7,"可還空位數":7,"未使用率":30,"已使用率":70},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":9,"未使用率":17,"已使用率":83},
+            {"場站區域":"龜山區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":6,"未使用率":25,"已使用率":75},
+            {"場站區域":"龜山區","總車位數":8,"可借車位數":4,"已借車位數":4,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":1,"已借車位數":15,"可還空位數":15,"未使用率":6,"已使用率":94},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":6,"已借車位數":2,"可還空位數":2,"未使用率":75,"已使用率":25},
+            {"場站區域":"中壢區","總車位數":18,"可借車位數":2,"已借車位數":16,"可還空位數":15,"未使用率":11,"已使用率":89},
+            {"場站區域":"平鎮區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":3,"已借車位數":13,"可還空位數":10,"未使用率":19,"已使用率":81},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":5,"已借車位數":9,"可還空位數":9,"未使用率":36,"已使用率":64},
+            {"場站區域":"桃園區","總車位數":6,"可借車位數":0,"已借車位數":6,"可還空位數":6,"未使用率":0,"已使用率":100},
+            {"場站區域":"中壢區","總車位數":10,"可借車位數":1,"已借車位數":9,"可還空位數":9,"未使用率":10,"已使用率":90},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":6,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":3,"已借車位數":9,"可還空位數":7,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":3,"已借車位數":5,"可還空位數":5,"未使用率":38,"已使用率":63},
+            {"場站區域":"龜山區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":5,"未使用率":20,"已使用率":80},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":6,"已借車位數":4,"可還空位數":4,"未使用率":60,"已使用率":40},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":1,"已借車位數":13,"可還空位數":12,"未使用率":7,"已使用率":93},
+            {"場站區域":"中壢區","總車位數":8,"可借車位數":1,"已借車位數":7,"可還空位數":7,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":2,"已借車位數":10,"可還空位數":9,"未使用率":17,"已使用率":83},
+            {"場站區域":"龜山區","總車位數":16,"可借車位數":3,"已借車位數":13,"可還空位數":11,"未使用率":19,"已使用率":81},
+            {"場站區域":"平鎮區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":5,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":2,"已借車位數":6,"可還空位數":6,"未使用率":25,"已使用率":75},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":1,"已借車位數":15,"可還空位數":15,"未使用率":6,"已使用率":94},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":3,"已借車位數":7,"可還空位數":7,"未使用率":30,"已使用率":70},
+            {"場站區域":"龜山區","總車位數":14,"可借車位數":8,"已借車位數":6,"可還空位數":6,"未使用率":57,"已使用率":43},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":3,"已借車位數":7,"可還空位數":7,"未使用率":30,"已使用率":70},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":1,"已借車位數":11,"可還空位數":9,"未使用率":8,"已使用率":92},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":4,"已借車位數":4,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"中壢區","總車位數":16,"可借車位數":2,"已借車位數":14,"可還空位數":14,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":6,"已借車位數":4,"可還空位數":3,"未使用率":60,"已使用率":40},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":4,"已借車位數":4,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":4,"已借車位數":6,"可還空位數":6,"未使用率":40,"已使用率":60},
+            {"場站區域":"桃園區","總車位數":10,"可借車位數":2,"已借車位數":8,"可還空位數":7,"未使用率":20,"已使用率":80},
+            {"場站區域":"桃園區","總車位數":8,"可借車位數":4,"已借車位數":4,"可還空位數":4,"未使用率":50,"已使用率":50},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":2,"已借車位數":14,"可還空位數":13,"未使用率":13,"已使用率":88},
+            {"場站區域":"龜山區","總車位數":24,"可借車位數":3,"已借車位數":21,"可還空位數":18,"未使用率":13,"已使用率":88},
+            {"場站區域":"桃園區","總車位數":20,"可借車位數":1,"已借車位數":19,"可還空位數":17,"未使用率":5,"已使用率":95},
+            {"場站區域":"桃園區","總車位數":14,"可借車位數":4,"已借車位數":10,"可還空位數":3,"未使用率":29,"已使用率":71},
+            {"場站區域":"桃園區","總車位數":16,"可借車位數":5,"已借車位數":11,"可還空位數":10,"未使用率":31,"已使用率":69},
+            {"場站區域":"桃園區","總車位數":12,"可借車位數":6,"已借車位數":6,"可還空位數":6,"未使用率":50,"已使用率":50}
+        ];
+
+        // Taoyuan region district center coordinates
+        const districtCenters = {
+            '桃園區': { lat: 24.9936, lng: 121.3010 },
+            '中壢區': { lat: 24.9536, lng: 121.2257 },
+            '龜山區': { lat: 24.9950, lng: 121.3650 },
+            '平鎮區': { lat: 24.9380, lng: 121.2170 },
+            '八德區': { lat: 24.9298, lng: 121.2828 },
+            '蘆竹區': { lat: 25.0450, lng: 121.2920 },
+            '大溪區': { lat: 24.8810, lng: 121.2860 }
+        };
+
+        const defaultCenter = { lat: 24.9750, lng: 121.2750 };
+
+        let processedData = [];
+        let map = null;
+        let markersLayer = null;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            loadInitialData(rawCSVData);
+            setupEventListeners();
+        });
+
+        function initMap() {
+            // Initialize Leaflet map targeting full container
+            map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([24.9700, 121.2600], 12);
+
+            // Relocate zoom control to top right to avoid overlap
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // CARTO Voyager Tile Layer (Reliable, high-speed, no access block, beautiful background aesthetics)
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19,
+                subdomains: 'abcd'
+            }).addTo(map);
+
+            markersLayer = L.layerGroup().addTo(map);
+        }
+
+        function processRawData(dataArray) {
+            let seed = 1234;
+            function pseudoRandom() {
+                const x = Math.sin(seed++) * 10000;
+                return x - Math.floor(x);
+            }
+
+            return dataArray.map((item, index) => {
+                const district = (item['場站區域'] || item['行政區'] || '未知區').trim();
+                const total = parseInt(item['總車位數'] || item['total'] || 0, 10);
+                const available = parseInt(item['可借車位數'] || item['available'] || 0, 10);
+                const borrowed = parseInt(item['已借車位數'] || item['borrowed'] || 0, 10);
+                const empty = parseInt(item['可還空位數'] || item['empty'] || 0, 10);
+                const unusedRate = parseFloat(item['未使用率'] || 0);
+                const usedRate = parseFloat(item['已使用率'] || 0);
+
+                const center = districtCenters[district] || defaultCenter;
+
+                // Spread markers cleanly across district
+                const latOffset = (pseudoRandom() - 0.5) * 0.048;
+                const lngOffset = (pseudoRandom() - 0.5) * 0.058;
+
+                return {
+                    id: index + 1,
+                    stationName: `${district} 站點 #${String(index + 1).padStart(3, '0')}`,
+                    district: district,
+                    total: total,
+                    available: available,
+                    borrowed: borrowed,
+                    empty: empty,
+                    unusedRate: unusedRate,
+                    usedRate: usedRate,
+                    lat: center.lat + latOffset,
+                    lng: center.lng + lngOffset
+                };
+            });
+        }
+
+        function loadInitialData(rawArray) {
+            processedData = processRawData(rawArray);
+
+            const districtSelect = document.getElementById('district-select');
+            const districts = [...new Set(processedData.map(d => d.district))].sort();
+
+            districtSelect.innerHTML = '<option value="ALL">全部行政區</option>';
+            districts.forEach(dist => {
+                const opt = document.createElement('option');
+                opt.value = dist;
+                opt.textContent = `${dist} (${processedData.filter(d => d.district === dist).length})`;
+                districtSelect.appendChild(opt);
+            });
+
+            updateOverallStats(processedData);
+            renderFilteredData();
+        }
+
+        function updateOverallStats(data) {
+            const totalStations = data.length;
+            const totalAvailable = data.reduce((sum, d) => sum + d.available, 0);
+            const totalEmpty = data.reduce((sum, d) => sum + d.empty, 0);
+            const avgUsage = totalStations > 0 
+                ? (data.reduce((sum, d) => sum + d.usedRate, 0) / totalStations).toFixed(1) 
+                : 0;
+
+            document.getElementById('stat-total-stations').textContent = totalStations;
+            document.getElementById('stat-total-available').textContent = totalAvailable.toLocaleString();
+            document.getElementById('stat-total-empty').textContent = totalEmpty.toLocaleString();
+            document.getElementById('stat-avg-usage').textContent = `${avgUsage}%`;
+        }
+
+        function renderFilteredData() {
+            const districtVal = document.getElementById('district-select').value;
+            const statusVal = document.getElementById('status-select').value;
+            const searchVal = document.getElementById('search-input').value.trim().toLowerCase();
+
+            const filtered = processedData.filter(item => {
+                if (districtVal !== 'ALL' && item.district !== districtVal) return false;
+                if (statusVal === 'AVAILABLE' && item.available <= 0) return false;
+                if (statusVal === 'EMPTY' && item.available > 0) return false;
+                if (statusVal === 'HIGH_USAGE' && item.usedRate <= 70) return false;
+
+                if (searchVal) {
+                    const matchName = item.stationName.toLowerCase().includes(searchVal);
+                    const matchDistrict = item.district.toLowerCase().includes(searchVal);
+                    const matchId = String(item.id).includes(searchVal);
+                    if (!matchName && !matchDistrict && !matchId) return false;
+                }
+
+                return true;
+            });
+
+            document.getElementById('filter-count').textContent = filtered.length;
+
+            renderStationCards(filtered);
+            renderMapMarkers(filtered);
+        }
+
+        function getStatusBadge(available) {
+            if (available >= 3) {
+                return {
+                    bg: 'bg-emerald-500',
+                    textColor: 'text-emerald-700',
+                    badgeBg: 'bg-emerald-100/80 border-emerald-300',
+                    text: '車輛充足'
+                };
+            } else if (available > 0) {
+                return {
+                    bg: 'bg-amber-500',
+                    textColor: 'text-amber-700',
+                    badgeBg: 'bg-amber-100/80 border-amber-300',
+                    text: '車輛較少'
+                };
+            } else {
+                return {
+                    bg: 'bg-rose-500',
+                    textColor: 'text-rose-700',
+                    badgeBg: 'bg-rose-100/80 border-rose-300',
+                    text: '無車可借'
+                };
+            }
+        }
+
+        function renderStationCards(data) {
+            const listContainer = document.getElementById('station-list');
+            listContainer.innerHTML = '';
+
+            if (data.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-12 text-slate-500 space-y-2">
+                        <i class="fa-solid fa-circle-exclamation text-3xl text-slate-400"></i>
+                        <p class="text-xs font-medium">查無符合條件的 YouBike 站點</p>
+                    </div>
+                `;
+                return;
+            }
+
+            data.forEach(item => {
+                const status = getStatusBadge(item.available);
+                const card = document.createElement('div');
+                card.className = `station-card bg-white/80 backdrop-blur-md p-3.5 rounded-2xl border border-slate-200/80 hover:border-amber-400 hover:shadow-lg transition-all cursor-pointer relative group`;
+                card.id = `card-${item.id}`;
+
+                card.innerHTML = `
+                    <div class="flex items-start justify-between mb-2">
+                        <div>
+                            <span class="font-bold text-slate-800 text-sm block">${item.stationName}</span>
+                            <span class="text-[11px] text-slate-500 font-medium"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${item.district}</span>
+                        </div>
+                        <span class="text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${status.badgeBg} ${status.textColor}">
+                            ${status.text}
+                        </span>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-1.5 text-center bg-slate-100/70 p-2 rounded-xl mb-2">
+                        <div>
+                            <span class="text-[10px] text-slate-400 block font-medium">可借車位</span>
+                            <span class="text-sm font-extrabold ${item.available > 0 ? 'text-emerald-600' : 'text-rose-600'}">${item.available}</span>
+                        </div>
+                        <div class="border-x border-slate-200/80">
+                            <span class="text-[10px] text-slate-400 block font-medium">可還空位</span>
+                            <span class="text-sm font-extrabold text-sky-600">${item.empty}</span>
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block font-medium">總車位</span>
+                            <span class="text-sm font-extrabold text-slate-700">${item.total}</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-[10px] text-slate-500 font-medium mb-1">
+                            <span>使用率 (${item.usedRate}%)</span>
+                            <span>已借 ${item.borrowed} 輛</span>
+                        </div>
+                        <div class="w-full bg-slate-200/70 rounded-full h-1.5 overflow-hidden">
+                            <div class="h-full ${item.usedRate > 80 ? 'bg-rose-500' : 'bg-amber-500'}" style="width: ${item.usedRate}%"></div>
+                        </div>
+                    </div>
+                `;
+
+                card.addEventListener('click', () => {
+                    locateOnMap(item);
+                });
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        function renderMapMarkers(data) {
+            markersLayer.clearLayers();
+
+            data.forEach(item => {
+                const status = getStatusBadge(item.available);
+
+                const customIcon = L.divIcon({
+                    className: 'custom-leaflet-icon',
+                    html: `
+                        <div class="marker-cluster-custom ${status.bg}" style="width: 32px; height: 32px; font-size: 12px;">
+                            ${item.available}
+                        </div>
+                    `,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+
+                const marker = L.marker([item.lat, item.lng], { icon: customIcon });
+
+                const popupContent = `
+                    <div class="p-2.5 min-w-[210px]">
+                        <div class="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-2 mb-2">
+                            <h4 class="font-bold text-slate-800 text-sm">${item.stationName}</h4>
+                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border ${status.badgeBg} ${status.textColor}">${status.text}</span>
+                        </div>
+                        <div class="space-y-1.5 text-xs text-slate-600 mb-2.5">
+                            <div class="flex justify-between"><span>行政區域：</span><strong class="text-slate-800">${item.district}</strong></div>
+                            <div class="flex justify-between"><span>可借車輛：</span><strong class="text-emerald-600 font-bold">${item.available} 輛</strong></div>
+                            <div class="flex justify-between"><span>可還空位：</span><strong class="text-sky-600 font-bold">${item.empty} 個</strong></div>
+                            <div class="flex justify-between"><span>總車位數：</span><strong class="text-slate-700">${item.total} 車位</strong></div>
+                        </div>
+                        <div class="pt-1.5 border-t border-slate-200/80">
+                            <div class="flex justify-between text-[10px] text-slate-400 font-medium mb-1">
+                                <span>即時使用率</span>
+                                <span>${item.usedRate}%</span>
+                            </div>
+                            <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                                <div class="h-full bg-amber-500" style="width: ${item.usedRate}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupContent);
+
+                marker.on('click', () => {
+                    highlightCard(item.id);
+                });
+
+                markersLayer.addLayer(marker);
+                item.marker = marker;
+            });
+
+            if (data.length > 0 && map) {
+                const group = L.featureGroup(data.map(d => d.marker));
+                map.fitBounds(group.getBounds().pad(0.12));
+            }
+        }
+
+        function locateOnMap(item) {
+            if (!map || !item.marker) return;
+
+            map.setView([item.lat, item.lng], 15, { animate: true, duration: 0.8 });
+            item.marker.openPopup();
+            highlightCard(item.id);
+        }
+
+        function highlightCard(cardId) {
+            document.querySelectorAll('.station-card').forEach(el => {
+                el.classList.remove('ring-2', 'ring-amber-500', 'bg-amber-100/60');
+            });
+
+            const targetCard = document.getElementById(`card-${cardId}`);
+            if (targetCard) {
+                targetCard.classList.add('ring-2', 'ring-amber-500', 'bg-amber-100/60');
+                targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function setupEventListeners() {
+            document.getElementById('district-select').addEventListener('change', renderFilteredData);
+            document.getElementById('status-select').addEventListener('change', renderFilteredData);
+            document.getElementById('search-input').addEventListener('input', renderFilteredData);
+
+            // Toggle Mobile Sidebar
+            const toggleBtn = document.getElementById('toggle-sidebar-btn');
+            const sidebar = document.getElementById('sidebar');
+            toggleBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('hidden');
+            });
+
+            // CSV File Upload
+            const fileInput = document.getElementById('csv-file-input');
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.data && results.data.length > 0) {
+                            loadInitialData(results.data);
+                            document.getElementById('data-source-tag').textContent = `自訂 CSV (${results.data.length}筆)`;
+                            document.getElementById('data-source-tag').className = 'text-[10px] bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-bold border border-amber-300';
+                            showToast(`已成功載入新 CSV 數據：共 ${results.data.length} 筆`);
+                        } else {
+                            showToast('無法讀取 CSV 內容，請檢查檔案格式');
+                        }
+                    },
+                    error: function() {
+                        showToast('CSV 解析失敗，請確認檔案內容');
+                    }
+                });
+            });
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const msgEl = document.getElementById('toast-msg');
+            msgEl.textContent = msg;
+
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            toast.classList.add('opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0', 'pointer-events-none');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
